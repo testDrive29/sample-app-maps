@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Maps</string>
+    <string name="map_detail_app_bar_title">Map Detail</string>
+    <string name="back_button">Back</string>
+    <string name="web_map_header">Web map</string>
+    <string name="preplanned_map_header">Map areas</string>
+</resources>
+
