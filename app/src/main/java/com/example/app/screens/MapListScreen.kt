@@ -1,5 +1,7 @@
 package com.example.app.screens
 
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -8,6 +10,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.arcgismaps.tasks.offlinemaptask.PreplannedMapArea
@@ -19,7 +22,9 @@ import com.example.app.ui.components.LabelText
 import com.example.app.ui.components.MapItem
 import com.example.app.ui.components.MapItemWithButton
 import com.example.app.viewmodel.MapListViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Composable function that displays a list of maps, including web map and preplanned offline maps.
@@ -29,7 +34,8 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun MapListScreen(viewModel: MapListViewModel, onWebMapClick: (downloadPath: String?) -> Unit) {
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     MapList(
         viewModel.webMapItemData.value,
@@ -41,12 +47,19 @@ fun MapListScreen(viewModel: MapListViewModel, onWebMapClick: (downloadPath: Str
             viewModel.deleteDownloadedMap(downloadPath)
         },
     ) { mapArea ->
-        scope.launch {
-            viewModel.downloadOfflineMapArea(
-                mapArea = mapArea,
-                coroutineScope = scope
-            )
-        }
+        viewModel.downloadOfflineMapArea(
+            mapArea = mapArea,
+            onDownloadSuccess = {
+                coroutineScope.launch {
+                    showToast(context, "Map downloaded successfully")
+                }
+            },
+            onDownloadFailure = {
+                coroutineScope.launch {
+                    showToast(context, "Error downloading map")
+                }
+            }
+        )
     }
 }
 
@@ -101,5 +114,9 @@ fun MapList(
             }
         }
     }
+}
+
+suspend fun showToast(context: Context, text: String) = withContext(Dispatchers.Main) {
+    Toast.makeText(context, text, Toast.LENGTH_LONG).show()
 }
 

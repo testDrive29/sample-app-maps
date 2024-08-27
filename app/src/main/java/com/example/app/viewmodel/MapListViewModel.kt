@@ -19,9 +19,10 @@ import com.example.app.data.MapItemState
 import com.example.app.data.WebMapItemData
 import com.example.app.data.OfflineMapItemData
 import com.example.app.network.NetworkManager
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 private const val TAG = "MapListViewModel"
@@ -72,12 +73,16 @@ class MapListViewModel(
         arcGISMapForDetailScreen.value = ArcGISMap(portalItem)
     }
 
-    suspend fun createDetailMapFromDownloadPath(downloadPath: String) {
+    private suspend fun getDownloadedArcGISMap(downloadPath: String): ArcGISMap? {
         val mapPackage = MobileMapPackage(downloadPath)
         mapPackage.load().getOrElse {
             Log.d(TAG, "Error loading mobile map package: $it")
         }
-        arcGISMapForDetailScreen.value = mapPackage.maps.first()
+        return mapPackage.maps.firstOrNull()
+    }
+
+    suspend fun createDetailMapFromDownloadPath(downloadPath: String) {
+        arcGISMapForDetailScreen.value = getDownloadedArcGISMap(downloadPath)
     }
 
     private fun createWebMapItemData() {
@@ -147,7 +152,7 @@ class MapListViewModel(
 
     }
 
-    private fun getDownloadState(itemId: String): MapItemState {
+    private suspend fun getDownloadState(itemId: String): MapItemState {
         return if (downloadedMapExists(itemId)) {
             MapItemState.Downloaded
         } else {
@@ -159,31 +164,52 @@ class MapListViewModel(
         return context.getExternalFilesDir(null)?.path + "_offlinePreplannedMap_" + itemId
     }
 
-    private fun downloadedMapExists(itemId: String): Boolean {
-        return File(getDownloadPathForPreplannedMapArea(itemId)).exists()
+    private suspend fun downloadedMapExists(itemId: String): Boolean {
+        val downloadPath = getDownloadPathForPreplannedMapArea(itemId)
+        val file = File(downloadPath)
+        return file.exists() && getDownloadedArcGISMap(downloadPath) != null
     }
 
-    suspend fun downloadOfflineMapArea(
+    fun downloadOfflineMapArea(
         mapArea: PreplannedMapArea,
-        coroutineScope: CoroutineScope
+        onDownloadSuccess: () -> Unit = {},
+        onDownloadFailure: () -> Unit = {}
     ) {
+        viewModelScope.launch {
+            downloadOfflineMapAreaAsync(mapArea, onDownloadSuccess, onDownloadFailure)
+        }
+    }
+
+    private suspend fun downloadOfflineMapAreaAsync(
+        mapArea: PreplannedMapArea,
+        onDownloadSuccess: () -> Unit = {},
+        onDownloadFailure: () -> Unit = {}
+    ) = withContext(Dispatchers.IO) {
         val offlineMapTask = OfflineMapTask(portalItem)
         val params = offlineMapTask.createDefaultDownloadPreplannedOfflineMapParameters(mapArea)
             .getOrElse { error ->
                 Log.d(TAG, "Failed to create download parameters: $error")
-                return
+                return@withContext
             }
 
         // use item id of the portal item to create a unique download path for the map area.
         val downloadPath = getDownloadPathForPreplannedMapArea(mapArea.portalItem.itemId)
 
+        // delete the downloaded map if it exists to handle use case where the map was partially downloaded
+        if (File(downloadPath).exists()) {
+            deleteDownloadedMap(downloadPath)
+        }
+
         val downloadPreplannedOfflineMapJob = offlineMapTask.createDownloadPreplannedOfflineMapJob(
             parameters = params,
             downloadDirectoryPath = downloadPath
         )
-        coroutineScope.launch {
+        launch {
             downloadPreplannedOfflineMapJob.progress.collect { progress ->
-                Log.i(TAG, "Downloading preplanned offline map. Job progress: $progress%")
+                Log.i(
+                    TAG,
+                    "Downloading preplanned offline map ${mapArea.portalItem.title}. Job progress: $progress%"
+                )
                 _preplannedMapAreasList.find { it.preplannedMapArea == mapArea }?.let { mapItem ->
                     // update the download progress in the list for the item being downloaded
                     val updatedMapItem = mapItem.copy(state = MapItemState.Downloading(progress))
@@ -196,10 +222,11 @@ class MapListViewModel(
         }
 
         downloadPreplannedOfflineMapJob.start()
-        Toast.makeText(context, "Downloading preplanned offline map", Toast.LENGTH_SHORT).show()
 
         downloadPreplannedOfflineMapJob.result().onSuccess {
             _preplannedMapAreasList.find { it.preplannedMapArea == mapArea }?.let { mapItem ->
+                Log.d(TAG, "Map downloaded successfully: ${mapArea.portalItem.title}")
+                onDownloadSuccess()
                 // update the downloaded map item's download path and download state in the list
                 val updatedMapItem =
                     mapItem.copy(downloadPath = downloadPath, state = MapItemState.Downloaded)
@@ -209,9 +236,9 @@ class MapListViewModel(
                     addDownloadedMapToPersistedMapList(updatedMapItem)
                 }
             }
-            Toast.makeText(context, "Map downloaded successfully", Toast.LENGTH_SHORT).show()
         }.onFailure {
-            Toast.makeText(context, "Error downloading offline map", Toast.LENGTH_SHORT).show()
+            Log.d(TAG, "Error downloading offline map: $it")
+            onDownloadFailure()
         }
     }
 
@@ -226,7 +253,6 @@ class MapListViewModel(
     fun deleteDownloadedMap(downloadPath: String) {
         val deleted = File(downloadPath).deleteRecursively()
         if (deleted) {
-            Toast.makeText(context, "Map deleted successfully", Toast.LENGTH_SHORT).show()
             _preplannedMapAreasList.find { it.downloadPath == downloadPath }?.let { mapItem ->
                 val deletedMapItem =
                     mapItem.copy(downloadPath = null, state = MapItemState.NotDownloaded)
@@ -237,7 +263,7 @@ class MapListViewModel(
                 }
             }
         } else {
-            Toast.makeText(context, "Error deleting map", Toast.LENGTH_SHORT).show()
+            Log.d(TAG, "Error deleting map at path: $downloadPath")
         }
     }
 
