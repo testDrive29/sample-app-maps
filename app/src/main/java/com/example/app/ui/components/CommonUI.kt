@@ -118,12 +118,12 @@ fun MapItemWithButton(
                 MoreIconButtonDropdownMenu(
                     menuItems = listOf(
                         MenuItem(
-                            label = "Delete Map",
-                            onClick = { onDeleteButtonClick(mapItemData.downloadPath!!) }
-                        ),
-                        MenuItem(
                             label = "View Map",
                             onClick = { onPreplannedMapAreaClick(mapItemData) }
+                        ),
+                        MenuItem(
+                            label = "Delete Map",
+                            onClick = { onDeleteButtonClick(mapItemData.downloadPath!!) }
                         )
                     )
                 )
